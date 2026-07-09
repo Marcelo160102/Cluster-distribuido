@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+.env.example
+.dockerignore
+*.md
+docs/
+tests/
+__pycache__/
+*.pyc
+.DS_Store

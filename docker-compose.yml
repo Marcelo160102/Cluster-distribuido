@@ -1,0 +1,63 @@
+services:
+  nodo1:
+    build: .
+    ports:
+      - "8001:8000"
+    environment:
+      - NODE_ID=nodo1
+      - NODE_PORT=8000
+      - PEERS=http://nodo2:8000,http://nodo3:8000
+    volumes:
+      - nodo1_data:/app/data
+    networks:
+      - cluster-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  nodo2:
+    build: .
+    ports:
+      - "8002:8000"
+    environment:
+      - NODE_ID=nodo2
+      - NODE_PORT=8000
+      - PEERS=http://nodo1:8000,http://nodo3:8000
+    volumes:
+      - nodo2_data:/app/data
+    networks:
+      - cluster-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  nodo3:
+    build: .
+    ports:
+      - "8003:8000"
+    environment:
+      - NODE_ID=nodo3
+      - NODE_PORT=8000
+      - PEERS=http://nodo1:8000,http://nodo2:8000
+    volumes:
+      - nodo3_data:/app/data
+    networks:
+      - cluster-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  nodo1_data:
+  nodo2_data:
+  nodo3_data:
+
+networks:
+  cluster-net:
+    driver: bridge
