@@ -32,6 +32,15 @@ async def sync_from_leader():
     print(f"[SYNC] Sincronización total completada: {len(items)} registros insertados")
 
 
+async def discover_leader() -> str | None:
+    for peer in cfg.PEERS:
+        result = await health_check(peer)
+        if result and result.get("role") == "leader":
+            peer_id = peer.split("//")[1].split(":")[0]
+            return peer_id
+    return None
+
+
 async def heartbeat_loop():
     global my_url
     my_url = f"http://{cfg.NODE_ID}:{cfg.NODE_PORT}"
@@ -53,11 +62,17 @@ async def heartbeat_loop():
                     node_alive[leader_url] = True
                     await sync_from_leader()
 
-        if not leader_alive:
-            elected = await start_election()
-            if elected:
-                all_urls = sorted(cfg.PEERS + [my_url])
-                print(f"[ELECTION] Nuevo líder elegido: {elected} (ID mayor en el clúster)")
+        if not leader_alive or not cfg.LEADER_ID:
+            existing_leader = await discover_leader()
+            if existing_leader:
+                cfg.LEADER_ID = existing_leader
+                print(f"[DISCOVER] Líder existente encontrado: {existing_leader}")
+                await sync_from_leader()
+            else:
+                elected = await start_election()
+                if elected:
+                    all_urls = sorted(cfg.PEERS + [my_url])
+                    print(f"[ELECTION] Nuevo líder elegido: {elected} (ID mayor en el clúster)")
 
         for peer in cfg.PEERS:
             if peer == my_url:
@@ -75,7 +90,8 @@ async def heartbeat_loop():
                 if was_dead:
                     print(f"[HEARTBEAT] {peer} RECUPERADO")
                     node_alive[peer] = True
-                    await sync_from_leader()
+                    if cfg.LEADER_ID:
+                        await sync_from_leader()
 
         await asyncio.sleep(cfg.HEARTBEAT_INTERVAL)
 
@@ -84,17 +100,24 @@ async def heartbeat_loop():
 async def startup():
     global my_url
     my_url = f"http://{cfg.NODE_ID}:{cfg.NODE_PORT}"
-    all_urls = sorted(cfg.PEERS + [my_url])
-    if my_url == all_urls[-1]:
-        cfg.LEADER_ID = None
-        print(f"[INIT] {cfg.NODE_ID} es el LÍDER inicial (mayor ID)")
-    else:
-        cfg.LEADER_ID = all_urls[-1].split("//")[1].split(":")[0]
-        print(f"[INIT] {cfg.NODE_ID} es SEGUIDOR, líder esperado: {cfg.LEADER_ID}")
-
     init_db()
     for peer in cfg.PEERS:
         node_alive[peer] = True
+
+    existing_leader = await discover_leader()
+    if existing_leader:
+        cfg.LEADER_ID = existing_leader
+        print(f"[INIT] {cfg.NODE_ID} es SEGUIDOR, líder detectado: {cfg.LEADER_ID}")
+        await sync_from_leader()
+    else:
+        all_urls = sorted(cfg.PEERS + [my_url])
+        if my_url == all_urls[-1]:
+            cfg.LEADER_ID = None
+            print(f"[INIT] {cfg.NODE_ID} es el LÍDER inicial (sin líder existente)")
+        else:
+            cfg.LEADER_ID = all_urls[-1].split("//")[1].split(":")[0]
+            print(f"[INIT] {cfg.NODE_ID} es SEGUIDOR (inicial), líder esperado: {cfg.LEADER_ID}")
+
     asyncio.create_task(heartbeat_loop())
 
 
