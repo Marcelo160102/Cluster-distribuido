@@ -5,9 +5,11 @@ from fastapi import FastAPI
 from src.database import init_db
 from src.node_client import health_check
 from src.routes_cluster import router as cluster_router
+from src.routes_data import router as data_router
 
 app = FastAPI(title="Nodo del Clúster Distribuido", version="1.0.0")
 app.include_router(cluster_router)
+app.include_router(data_router)
 
 failed_attempts: dict[str, int] = {}
 node_alive: dict[str, bool] = {}
@@ -33,6 +35,15 @@ async def heartbeat_loop():
 
 @app.on_event("startup")
 async def startup():
+    all_ids = sorted(cfg.PEERS + [f"http://{cfg.NODE_ID}:{cfg.NODE_PORT}"])
+    my_url = f"http://{cfg.NODE_ID}:{cfg.NODE_PORT}"
+    if my_url == all_ids[-1]:
+        cfg.LEADER_ID = None
+        print(f"[INIT] {cfg.NODE_ID} es el LÍDER inicial (mayor ID)")
+    else:
+        cfg.LEADER_ID = all_ids[-1].split("//")[1].split(":")[0]
+        print(f"[INIT] {cfg.NODE_ID} es SEGUIDOR, líder esperado: {cfg.LEADER_ID}")
+
     init_db()
     for peer in cfg.PEERS:
         node_alive[peer] = True
