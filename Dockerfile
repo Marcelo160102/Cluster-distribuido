@@ -9,7 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
 
 COPY src/ ./src
 
-RUN adduser --system --group appuser
+RUN adduser --system --group appuser && \
+    mkdir -p /app/data && \
+    chown appuser:appuser /app/data
 USER appuser
 
 ENV PYTHONUNBUFFERED=1
