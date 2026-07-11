@@ -62,7 +62,7 @@ async def heartbeat_loop():
                     node_alive[leader_url] = True
                     await sync_from_leader()
 
-        if not leader_alive or not cfg.LEADER_ID:
+        if cfg.LEADER_ID is not None and not leader_alive:
             existing_leader = await discover_leader()
             if existing_leader:
                 cfg.LEADER_ID = existing_leader
@@ -71,7 +71,6 @@ async def heartbeat_loop():
             else:
                 elected = await start_election()
                 if elected:
-                    all_urls = sorted(cfg.PEERS + [my_url])
                     print(f"[ELECTION] Nuevo líder elegido: {elected} (ID mayor en el clúster)")
 
         for peer in cfg.PEERS:
@@ -107,15 +106,18 @@ async def startup():
     existing_leader = await discover_leader()
     if existing_leader:
         cfg.LEADER_ID = existing_leader
+        cfg.IS_LEADER = False
         print(f"[INIT] {cfg.NODE_ID} es SEGUIDOR, líder detectado: {cfg.LEADER_ID}")
         await sync_from_leader()
     else:
         all_urls = sorted(cfg.PEERS + [my_url])
         if my_url == all_urls[-1]:
             cfg.LEADER_ID = None
+            cfg.IS_LEADER = True
             print(f"[INIT] {cfg.NODE_ID} es el LÍDER inicial (sin líder existente)")
         else:
             cfg.LEADER_ID = all_urls[-1].split("//")[1].split(":")[0]
+            cfg.IS_LEADER = False
             print(f"[INIT] {cfg.NODE_ID} es SEGUIDOR (inicial), líder esperado: {cfg.LEADER_ID}")
 
     asyncio.create_task(heartbeat_loop())
@@ -123,5 +125,5 @@ async def startup():
 
 @app.get("/")
 async def root():
-    role = "follower" if cfg.LEADER_ID else "leader"
+    role = "leader" if cfg.IS_LEADER else "follower"
     return {"node_id": cfg.NODE_ID, "role": role, "status": "alive", "leader": cfg.LEADER_ID}
