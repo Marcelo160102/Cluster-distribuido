@@ -8,14 +8,16 @@ from src.replication import replicate_to_followers
 router = APIRouter()
 
 
-@router.post("/data", response_model=ItemResponse)
-async def create_item(item: ItemCreate):
+def _ensure_leader():
     if cfg.LEADER_ID and cfg.LEADER_ID != cfg.NODE_ID:
         raise HTTPException(status_code=503, detail=f"Leader is {cfg.LEADER_ID}")
-
-    if not cfg.LEADER_ID and cfg.NODE_ID != sorted(cfg.PEERS + [cfg.NODE_ID])[-1]:
+    if not cfg.IS_LEADER:
         raise HTTPException(status_code=503, detail="This node is not the leader")
 
+
+@router.post("/data", response_model=ItemResponse)
+async def create_item(item: ItemCreate):
+    _ensure_leader()
     local = create(item.data)
     success = await replicate_to_followers("create", data=item.data, item_id=local["id"])
     if not success:
@@ -41,12 +43,7 @@ async def get_item(item_id: str):
 
 @router.put("/data/{item_id}", response_model=ItemResponse)
 async def update_item(item_id: str, item: ItemUpdate):
-    if cfg.LEADER_ID and cfg.LEADER_ID != cfg.NODE_ID:
-        raise HTTPException(status_code=503, detail=f"Leader is {cfg.LEADER_ID}")
-
-    if not cfg.LEADER_ID and cfg.NODE_ID != sorted(cfg.PEERS + [cfg.NODE_ID])[-1]:
-        raise HTTPException(status_code=503, detail="This node is not the leader")
-
+    _ensure_leader()
     existing = get_by_id(item_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -64,12 +61,7 @@ async def update_item(item_id: str, item: ItemUpdate):
 
 @router.delete("/data/{item_id}")
 async def delete_item(item_id: str):
-    if cfg.LEADER_ID and cfg.LEADER_ID != cfg.NODE_ID:
-        raise HTTPException(status_code=503, detail=f"Leader is {cfg.LEADER_ID}")
-
-    if not cfg.LEADER_ID and cfg.NODE_ID != sorted(cfg.PEERS + [cfg.NODE_ID])[-1]:
-        raise HTTPException(status_code=503, detail="This node is not the leader")
-
+    _ensure_leader()
     existing = get_by_id(item_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Item not found")
