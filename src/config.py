@@ -9,3 +9,4 @@ LEADER_ID: str | None = os.environ.get("LEADER_ID")
 HEARTBEAT_INTERVAL: float = 3.0
 HTTP_TIMEOUT: float = 1.5
 MAX_FAILED_ATTEMPTS: int = 3
+IS_LEADER: bool = False
