@@ -1,3 +1,10 @@
+"""Punto de entrada del nodo — FastAPI + Heartbeat Loop.
+
+Cada nodo del clúster ejecuta:
+1. Servidor FastAPI con routers de datos públicos y de clúster interno.
+2. Tarea asíncrona en background (heartbeat_loop) que monitorea peers,
+   detecta caídas del líder, dispara elecciones y sincroniza nodos recuperados.
+"""
 import asyncio
 
 import app.core.config as cfg
@@ -12,12 +19,20 @@ app = FastAPI(title="Nodo del Clúster Distribuido", version="1.0.0")
 app.include_router(cluster_router)
 app.include_router(data_router)
 
+# Registro de intentos fallidos y estado de conectividad por peer
 failed_attempts: dict[str, int] = {}
 node_alive: dict[str, bool] = {}
 my_url: str = ""
 
 
 async def sync_from_leader():
+    """Sincronización total por estado completo.
+
+    Flujo:
+    1. Vacía la tabla local (DELETE FROM items)
+    2. Descarga TODO el listado del líder (GET /cluster/sync)
+    3. Inserta en una transacción atómica (insert_many)
+    """
     if not cfg.LEADER_ID:
         return
     leader_url = f"http://{cfg.LEADER_ID}:{cfg.NODE_PORT}"
@@ -33,6 +48,11 @@ async def sync_from_leader():
 
 
 async def discover_leader() -> str | None:
+    """Consulta a todos los peers si alguno es líder.
+
+    Retorna el ID del primer nodo que responda con role=leader,
+    o None si no hay líder en el clúster.
+    """
     for peer in cfg.PEERS:
         result = await health_check(peer)
         if result and result.get("role") == "leader":
@@ -42,6 +62,13 @@ async def discover_leader() -> str | None:
 
 
 async def heartbeat_loop():
+    """Loop principal de monitoreo (se ejecuta como tarea asíncrona de fondo).
+
+    Por cada iteración:
+    - Verifica salud del líder actual (si existe)
+    - Si el líder murió, descubre uno existente o inicia elección Bully
+    - Verifica salud de todos los peers, detecta recuperaciones y sincroniza
+    """
     global my_url
     my_url = f"http://{cfg.NODE_ID}:{cfg.NODE_PORT}"
     while True:
@@ -71,7 +98,7 @@ async def heartbeat_loop():
             else:
                 elected = await start_election()
                 if elected:
-                    print(f"[ELECTION] Nuevo líder elegido: {elected} (ID mayor en el clúster)")
+                    print(f"[ELECCIÓN] Nuevo líder elegido: {elected} (ID mayor en el clúster)")
 
         for peer in cfg.PEERS:
             if peer == my_url:
@@ -97,6 +124,14 @@ async def heartbeat_loop():
 
 @app.on_event("startup")
 async def startup():
+    """Inicialización del nodo al arrancar FastAPI.
+
+    1. Inicializa base de datos SQLite
+    2. Descubre si ya hay un líder en el clúster
+    3. Si hay líder → se une como seguidor y sincroniza
+    4. Si no hay líder → el de mayor ID se declara líder inicial
+    5. Arranca el heartbeat_loop en background
+    """
     global my_url
     my_url = f"http://{cfg.NODE_ID}:{cfg.NODE_PORT}"
     init_db()
@@ -125,5 +160,6 @@ async def startup():
 
 @app.get("/")
 async def root():
+    """Endpoint raíz — información básica del nodo."""
     role = "leader" if cfg.IS_LEADER else "follower"
     return {"node_id": cfg.NODE_ID, "role": role, "status": "alive", "leader": cfg.LEADER_ID}
