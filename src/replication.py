@@ -7,7 +7,7 @@ async def replicate_to_followers(operation: str, data: str | None = None, item_i
     peers = [p for p in cfg.PEERS]
     payload = {"operation": operation, "data": data, "item_id": item_id}
 
-    acks = 0
+    acks = 1
     for peer in peers:
         ok = await send_replica(peer, payload)
         if ok:
@@ -20,4 +20,5 @@ async def replicate_to_followers(operation: str, data: str | None = None, item_i
         delete(item_id)
 
     cfg.LEADER_ID = None
+    cfg.IS_LEADER = False
     return False
