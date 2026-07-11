@@ -30,6 +30,7 @@ async def start_election() -> str | None:
 
 async def become_leader() -> None:
     cfg.LEADER_ID = None
+    cfg.IS_LEADER = True
     print(f"[ELECTION] {cfg.NODE_ID} se autodeclara LÍDER")
     for peer in cfg.PEERS:
         await announce_leader(peer, cfg.NODE_ID)

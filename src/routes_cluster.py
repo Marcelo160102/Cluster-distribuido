@@ -9,7 +9,7 @@ router = APIRouter()
 
 @router.get("/health")
 async def health():
-    role = "follower" if cfg.LEADER_ID else "leader"
+    role = "leader" if cfg.IS_LEADER else "follower"
     return {"node_id": cfg.NODE_ID, "role": role, "status": "alive"}
 
 
