@@ -1,6 +1,6 @@
-import src.config as cfg
-from src.database import delete
-from src.node_client import send_replica
+import app.core.config as cfg
+from app.core.database import delete
+from app.services.node_client import send_replica
 
 
 async def replicate_to_followers(operation: str, data: str | None = None, item_id: str | None = None) -> bool:

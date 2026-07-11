@@ -1,12 +1,12 @@
 import asyncio
 
-import src.config as cfg
+import app.core.config as cfg
+from app.core.database import init_db, delete_all, insert_many
+from app.services.leader_election import start_election
+from app.services.node_client import health_check, cluster_sync
+from app.api.routes_cluster import router as cluster_router
+from app.api.routes_data import router as data_router
 from fastapi import FastAPI
-from src.database import init_db, delete_all, insert_many, get_all
-from src.leader_election import start_election
-from src.node_client import health_check, cluster_sync
-from src.routes_cluster import router as cluster_router
-from src.routes_data import router as data_router
 
 app = FastAPI(title="Nodo del Clúster Distribuido", version="1.0.0")
 app.include_router(cluster_router)

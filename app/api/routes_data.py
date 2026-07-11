@@ -1,9 +1,9 @@
 from fastapi import APIRouter, HTTPException
 
-import src.config as cfg
-from src.database import get_all, get_by_id, create, update, delete
-from src.models import ItemCreate, ItemUpdate, ItemResponse
-from src.replication import replicate_to_followers
+import app.core.config as cfg
+from app.core.database import get_all, get_by_id, create, update, delete
+from app.domain.schemas import ItemCreate, ItemUpdate, ItemResponse
+from app.services.replication import replicate_to_followers
 
 router = APIRouter()
 

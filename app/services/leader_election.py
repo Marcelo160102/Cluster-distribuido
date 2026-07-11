@@ -1,7 +1,5 @@
-import asyncio
-
-import src.config as cfg
-from src.node_client import send_election, announce_leader
+import app.core.config as cfg
+from app.services.node_client import send_election, announce_leader
 
 
 async def start_election() -> str | None:

@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DB_DIR = Path("/app/data")
+DB_DIR = Path("/app/data") if Path("/app/data").exists() else Path("data")
+DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DB_DIR / "data.db"
 
 

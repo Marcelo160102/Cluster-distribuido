@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 
-import src.config as cfg
-from src.database import get_all
-from src.models import ElectionMessage
+import app.core.config as cfg
+from app.core.database import get_all
+from app.domain.schemas import ElectionMessage
 
 router = APIRouter()
 
@@ -15,7 +15,7 @@ async def health():
 
 @router.post("/replicate")
 async def replicate(payload: dict):
-    from src.database import create, update, delete
+    from app.core.database import create, update, delete
 
     operation = payload.get("operation")
     if operation == "create":

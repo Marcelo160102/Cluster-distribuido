@@ -1,6 +1,6 @@
 import httpx
 
-import src.config as cfg
+import app.core.config as cfg
 
 
 async def health_check(node_url: str) -> dict | None:
