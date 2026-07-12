@@ -1,79 +1,49 @@
-"""Cliente HTTP asíncrono para comunicación entre nodos.
+"""Cliente de red para la comunicación entre nodos del clúster.
 
-Cada función encapsula una llamada REST a un endpoint interno del clúster.
-Todas capturan httpx.TimeoutException y httpx.RequestError para robustez
-ante fallos de red o nodos caídos.
+Contiene las llamadas HTTP asíncronas para gestionar las fases de consenso,
+validar la salud de los peers y participar en las elecciones del clúster.
 """
 import httpx
+import asyncio
 
-import app.core.config as cfg
+# Tiempo de espera optimizado para evitar bloqueos del event loop durante el consenso
+TIMEOUT_CONFIG = httpx.Timeout(5.0, connect=2.0)
 
+async def send_3pc_phase(peer_url: str, phase: str, payload: dict) -> bool:
+    """Envía de forma asíncrona una fase del protocolo 3PC a un nodo seguidor.
 
-async def health_check(node_url: str) -> dict | None:
-    """Consulta GET /health de un nodo peer. Retorna el JSON o None si falla."""
-    try:
-        async with httpx.AsyncClient(timeout=cfg.HTTP_TIMEOUT) as client:
-            resp = await client.get(f"{node_url}/health")
-            return resp.json() if resp.status_code == 200 else None
-    except httpx.TimeoutException:
-        return None
-    except httpx.RequestError:
-        return None
+    Args:
+        peer_url: URL base del nodo destino (ej. "http://nodo2:8000")
+        phase: Nombre de la fase ("can_commit", "pre_commit", "do_commit", "abort")
+        payload: Datos de la transacción o identificador de la misma (tx_id)
 
-
-async def send_replica(node_url: str, payload: dict) -> bool:
-    """Envía una operación de replicación a un seguidor vía POST /replicate."""
-    try:
-        async with httpx.AsyncClient(timeout=cfg.HTTP_TIMEOUT) as client:
-            resp = await client.post(f"{node_url}/replicate", json=payload)
-            return resp.status_code == 200
-    except httpx.TimeoutException:
-        return False
-    except httpx.RequestError:
-        return False
-
-
-async def send_election(node_url: str, msg: dict) -> bool:
-    """Envía un mensaje de elección Bully a un nodo peer."""
-    try:
-        async with httpx.AsyncClient(timeout=cfg.HTTP_TIMEOUT) as client:
-            resp = await client.post(f"{node_url}/election", json=msg)
-            return resp.status_code == 200
-    except httpx.TimeoutException:
-        return False
-    except httpx.RequestError:
-        return False
-
-
-async def announce_leader(node_url: str, leader_id: str) -> bool:
-    """Notifica a un nodo peer que un nuevo líder ha sido elegido.
-
-    El nodo receptor actualiza su LEADER_ID con el ID recibido.
+    Returns:
+        True si el nodo responde con éxito y aprueba la fase, False si falla o da timeout.
     """
-    try:
-        async with httpx.AsyncClient(timeout=cfg.HTTP_TIMEOUT) as client:
-            resp = await client.post(
-                f"{node_url}/leader-announce",
-                json={"leader_id": leader_id},
-            )
-            return resp.status_code == 200
-    except httpx.TimeoutException:
-        return False
-    except httpx.RequestError:
-        return False
-
-
-async def cluster_sync(node_url: str) -> list | None:
-    """Solicita el estado completo del líder vía GET /cluster/sync.
-
-    Usado por un nodo recuperado para descargar todos los registros
-    y reemplazar su base de datos local.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=cfg.HTTP_TIMEOUT * 2) as client:
-            resp = await client.get(f"{node_url}/cluster/sync")
-            return resp.json() if resp.status_code == 200 else None
-    except httpx.TimeoutException:
-        return None
-    except httpx.RequestError:
-        return None
+    url = f"{peer_url}/cluster/3pc/{phase}"
+    
+    async with httpx.AsyncClient(timeout=TIMEOUT_CONFIG) as client:
+        try:
+            response = await client.post(url, json=payload)
+            
+            if response.status_code != 200:
+                print(f"[CLIENT-3PC] Nodo {peer_url} rechazó la fase {phase}. Código: {response.status_code}")
+                return False
+                
+            data = response.json()
+            
+            # Validaciones de confirmación según la fase específica
+            if phase == "can_commit" and data.get("vote") == "YES":
+                return True
+            elif phase == "pre_commit" and data.get("status") == "ACK":
+                return True
+            elif phase == "do_commit" and data.get("status") == "committed":
+                return True
+            elif phase == "abort" and data.get("status") == "aborted":
+                return True
+                
+            return False
+            
+        except (httpx.RequestError, httpx.TimeoutException) as e:
+            print(f"[CLIENT-3PC] Error de red al conectar con {peer_url} en fase {phase}: {str(e)}")
+            return False
