@@ -1,57 +1,67 @@
+version: '3.8'
+
+# 1. DRY (Don't Repeat Yourself): Uso de anclas (anchors) para evitar repetir código.
+x-node-common: &node-common
+  build: .
+  networks:
+    - cluster-net
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 3
+  # 2. Límites de recursos: Clave para pruebas de rendimiento controladas.
+  deploy:
+    resources:
+      limits:
+        cpus: '0.50'
+        memory: 512M
+
 services:
+  # --- Nodos del Clúster ---
   nodo1:
-    build: .
-    ports:
-      - "8001:8000"
+    <<: *node-common
     environment:
       - NODE_ID=nodo1
       - NODE_PORT=8000
       - PEERS=http://nodo2:8000,http://nodo3:8000
     volumes:
       - nodo1_data:/app/data
-    networks:
-      - cluster-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
 
   nodo2:
-    build: .
-    ports:
-      - "8002:8000"
+    <<: *node-common
     environment:
       - NODE_ID=nodo2
       - NODE_PORT=8000
       - PEERS=http://nodo1:8000,http://nodo3:8000
     volumes:
       - nodo2_data:/app/data
-    networks:
-      - cluster-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
 
   nodo3:
-    build: .
-    ports:
-      - "8003:8000"
+    <<: *node-common
     environment:
       - NODE_ID=nodo3
       - NODE_PORT=8000
       - PEERS=http://nodo1:8000,http://nodo2:8000
     volumes:
       - nodo3_data:/app/data
+
+  # --- Balanceador de Carga (Fase 3: Alta Disponibilidad) ---
+  loadbalancer:
+    image: nginx:alpine
+    ports:
+      - "80:80"  # Punto de entrada único
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      nodo1:
+        condition: service_healthy
+      nodo2:
+        condition: service_healthy
+      nodo3:
+        condition: service_healthy
     networks:
       - cluster-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
 
 volumes:
   nodo1_data:
