@@ -76,7 +76,7 @@ async def do_commit(payload: dict):
     print(f"[3PC] [TX:{tx_id}] Fase DoCommit: Consolidando '{operation}' de forma definitiva")
 
     if operation == "create":
-        result = create(data)
+        result = create(data, item_id=item_id)
         return {"status": "committed", "item": result}
     
     elif operation == "update":

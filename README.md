@@ -1,407 +1,269 @@
-# Clúster Distribuido con Replicación de Datos
+# Clúster Distribuido VoIP — Servicios Web con Alta Disponibilidad
 
-Sistema de 3 nodos que forman un clúster distribuido con replicación Maestro-Esclavo, algoritmo de elección Bully y tolerancia a fallos. Cada nodo funciona como un registro de **Endpoints VoIP activos** (SIP, WebRTC, PJSIP) con persistencia en SQLite, comunicación asíncrona vía HTTP y sincronización automática ante recuperación de caídas.
+Clúster de 3 nodos para registro distribuido de endpoints VoIP con protocolo de consenso **3PC (Three-Phase Commit)**, algoritmo de elección **Bully**, balanceo de carga con **nginx**, seguridad **HTTPS + API Key** y monitoreo con **Prometheus + Grafana**.
 
-## Arquitectura del Sistema
+---
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    RED DOCKER (cluster-net)                 │
-│                                                             │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐     │
-│  │   Nodo 1     │   │   Nodo 2     │   │   Nodo 3     │     │
-│  │  (LÍDER)     │   │  (SEGUIDOR)  │   │  (SEGUIDOR)  │     │
-│  │              │   │              │   │              │     │
-│  │ FastAPI      │   │ FastAPI      │   │ FastAPI      │     │
-│  │ SQLite (WAL) │   │ SQLite (WAL) │   │ SQLite (WAL) │     │
-│  │ Puerto 8001  │   │ Puerto 8002  │   │ Puerto 8003  │     │
-│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘     │
-│         │                  │                  │             │
-│         └──────────────────┴──────────────────┘             │
-│              HTTP (httpx) asíncrono entre nodos             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Estructura del Proyecto
+## Arquitectura
 
 ```
-cluster-distribuido/
-├── docker-compose.yml           # Orquestación de 3 contenedores
-├── Dockerfile                   # Imagen Python 3.11-slim + curl
-├── requirements.txt             # fastapi, uvicorn, httpx, pydantic
-├── .env.example                 # Plantilla de variables de entorno
-├── .gitignore
-├── .dockerignore
-├── README.md
-│
-├── app/
-│   ├── main.py                  # Punto de entrada FastAPI + heartbeat loop
-│   │
-│   ├── core/                    # Infraestructura base
-│   │   ├── config.py            # Variables de entorno y constantes
-│   │   └── database.py          # SQLite en WAL + CRUD parametrizado
-│   │
-│   ├── domain/                  # Modelos de dominio
-│   │   └── schemas.py           # VoipEndpoint, ItemCreate, ReplicaRequest, etc.
-│   │
-│   ├── api/                     # Capa de presentación (routers)
-│   │   ├── routes_data.py       # CRUD público (/data)
-│   │   └── routes_cluster.py    # Endpoints internos (/health, /replicate, /election, /sync)
-│   │
-│   └── services/                # Capa de negocio
-│       ├── replication.py       # Replicación a seguidores + quórum
-│       ├── leader_election.py   # Algoritmo Bully
-│       └── node_client.py       # Cliente HTTP asíncrono (httpx)
-│
-└── tests/
-    └── test_integration.py      # Pruebas de integración
+Cliente ──HTTP/HTTPS──→ nginx LB (:80/:443)
+                              │
+                ┌─────────────┼─────────────┐
+                ▼             ▼             ▼
+            nodo1 ── 3PC ──→ nodo2 ── 3PC ──→ nodo3
+            (8000)   ←────   (8000)   ←────   (8000)
+               │                              │
+               └────────── Bully + Heartbeat ──┘
+
+Monitoreo: cAdvisor → Prometheus → Grafana
 ```
 
-### Flujo de Datos (Escritura)
+### Componentes
 
-```
-Cliente ──POST /data──→ LÍDER
-                          ├── 1. Valida con Pydantic (VoipEndpoint)
-                          ├── 2. Persiste en SQLite local
-                          ├── 3. Replica a SEGUIDORES (POST /replicate)
-                          │     ├── nodo2 → ACK
-                          │     └── nodo3 → ACK
-                          ├── 4. Quórum ≥ 2 → OK → responde 201
-                          └── 5. Quórum < 2 → rollback + auto-degradación → 503
-```
-
-### Protocolo entre Nodos
-
-| Endpoint | Origen → Destino | Propósito |
+| Servicio | Tecnología | Propósito |
 |---|---|---|
-| `GET /health` | Cualquiera → Cualquiera | Heartbeat (cada 3s) |
-| `POST /replicate` | Líder → Seguidores | Replicar operación CRUD |
-| `POST /election` | Seguidor → Todos | Iniciar elección Bully |
-| `POST /leader-announce` | Nuevo líder → Todos | Anunciar liderazgo |
-| `GET /cluster/sync` | Seguidor → Líder | Sincronización total post-caída |
+| 3× nodo | FastAPI + SQLite WAL | API REST + persistencia local |
+| Load Balancer | nginx:alpine | Round-robin, termina TLS |
+| cAdvisor | gcr.io/cadvisor | Métricas de contenedores |
+| Prometheus | prom/prometheus | Almacenamiento de métricas |
+| Grafana | grafana/grafana | Dashboards de monitoreo |
 
 ---
 
-## Requisitos Previos
+## Requisitos
 
-| Herramienta | Versión Mínima | Instalación |
-|---|---|---|
-| Docker | 24+ | [Linux](https://docs.docker.com/engine/install/) / [Windows](https://docs.docker.com/desktop/install/windows-install/) |
-| Docker Compose | v2+ | Incluido en Docker Desktop o `docker compose` (plugin) |
-| curl | cualquier | `apt install curl` / `pacman -S curl` |
-| jq | cualquier (opcional) | Para formatear JSON: `apt install jq` |
-
-### Windows (WSL2)
-
-1. Instalar [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) con backend WSL2
-2. Abrir una terminal **WSL2** (Ubuntu recomendado) o **Git Bash**
-3. Clonar el repositorio dentro del filesystem de Linux (`/home/usuario/...`)
-4. Todos los comandos de este tutorial (`curl`, `jq`, `docker compose`) deben ejecutarse en la terminal WSL2, **no en cmd/PowerShell**, a menos que tengas `curl` y `jq` instalados nativamente en Windows
-
-### Linux
-
-Docker Engine nativo + plugin Compose.
-
-### VSCode
-
-Extensiones recomendadas:
-- **Docker** (ms-azuretools.vscode-docker) — ver logs, contenedores, redes
-- **Python** (ms-python.python) — resaltado de sintaxis
-- **Even Better TOML** (opcional)
+- Docker 24+ con Docker Compose plugin
+- Git
+- curl
 
 ---
 
-## Instalación y Ejecución
-
-### 1. Clonar el repositorio
+## Instalación
 
 ```bash
-git clone <url-del-repositorio> cluster-distribuido
-cd cluster-distribuido
+git clone git@github.com:Marcelo160102/Cluster-distribuido.git
+cd Cluster-distribuido
+
+# Generar certificado SSL (para HTTPS)
+bash scripts/gen-certs.sh
+
+# (Opcional) API Key personalizada
+export API_KEY=mi-clave-segura
+
+# Construir y levantar
+docker compose up --build -d
+
+# Verificar estado
+docker ps --format 'table {{.Names}}\t{{.Status}}'
+
+# Smoke test
+bash tests/smoke_test.sh
 ```
 
-### 2. Construir y levantar los 3 nodos
+### Servicios esperados (7 contenedores)
 
-```bash
-docker compose up --build
 ```
-
-La primera vez descargará `python:3.11-slim` e instalará las dependencias (~2-5 minutos).
-
-### 3. Verificar que los 3 nodos están vivos
-
-En una terminal separada (o nueva pestaña):
-
-```bash
-curl -s http://localhost:8001/ | jq .
-curl -s http://localhost:8002/ | jq .
-curl -s http://localhost:8003/ | jq .
+cluster-distribuido-nodo1-1          Up (healthy)
+cluster-distribuido-nodo2-1          Up (healthy)
+cluster-distribuido-nodo3-1          Up (healthy)
+cluster-distribuido-loadbalancer-1   Up
+cluster-distribuido-cadvisor-1       Up
+cluster-distribuido-prometheus-1     Up
+cluster-distribuido-grafana-1        Up
 ```
-
-Salida esperada (el líder será el nodo con mayor ID, normalmente nodo3):
-
-```json
-{
-  "node_id": "nodo3",
-  "role": "leader",
-  "status": "alive",
-  "leader": null
-}
-```
-
-Los seguidores mostrarán `"role": "follower"` y `"leader": "nodo3"`.
-
-### 4. Ver logs en vivo
-
-```bash
-docker compose logs -f
-```
-
-Para filtrar por nodo:
-
-```bash
-docker compose logs -f nodo1
-```
-
-O desde VSCode: icono de Docker → clic derecho en el contenedor → "View Logs".
 
 ---
 
-## Tutorial de Pruebas Paso a Paso
+## Pruebas de Funcionamiento
 
-### Prueba 1: Replicación Exitosa
+Todas las pruebas se realizan a través del **Load Balancer** en `localhost:80`.
 
-Crear un endpoint VoIP en el líder:
+> **Importante:** Los endpoints `/data` requieren header `X-API-Key`.
+> Clave por defecto: `cluster-demo-key-2026`.
+
+### Prueba 1: Health y estado del clúster
 
 ```bash
-# Identificar el líder
-curl -s http://localhost:8001/ | jq .role
-curl -s http://localhost:8002/ | jq .role
-curl -s http://localhost:8003/ | jq .role
+# Health vía LB
+curl -s http://localhost:80/health
 
-# POST al líder
-curl -s -X POST http://localhost:8003/data \
+# Info del nodo
+curl -s http://localhost:80/
+```
+
+### Prueba 2: Crear endpoint VoIP (replicación 3PC)
+
+```bash
+# Crear (puede requerir reintentos hasta dar con el líder vía round-robin)
+curl -s -X POST http://localhost:80/data \
   -H "Content-Type: application/json" \
-  -d '{"data": "{\"extension\": \"101\", \"protocol\": \"SIP\", \"ip_address\": \"192.168.1.50\", \"status\": \"online\", \"user_agent\": \"Yealink T48S\"}"}' | jq .
+  -H "X-API-Key: cluster-demo-key-2026" \
+  -d '{"data": "{\"extension\": \"101\", \"protocol\": \"SIP\", \"ip_address\": \"192.168.1.50\", \"status\": \"online\", \"user_agent\": \"Yealink T48S\"}"}'
+
+# Leer (cualquier nodo)
+curl -s http://localhost:80/data -H "X-API-Key: cluster-demo-key-2026"
 ```
 
-Respuesta esperada:
-
-```json
-{
-  "id": "cece2ac8-...",
-  "data": "{\"extension\": \"101\", ...}",
-  "created_at": "2026-...",
-  "updated_at": "2026-..."
-}
-```
-
-Verificar que los datos se replicaron en los 3 nodos:
+### Prueba 3: Actualizar y eliminar
 
 ```bash
-curl -s http://localhost:8001/data | jq .
-curl -s http://localhost:8002/data | jq .
-curl -s http://localhost:8003/data | jq .
-```
+# Obtener ID del primer registro
+ID=$(curl -s http://localhost:80/data -H "X-API-Key: cluster-demo-key-2026" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['id'])")
 
-Los 3 deben devolver el mismo contenido. Confirmación visual en logs:
-
-```
-nodo2-1  | INFO: ... "POST /replicate HTTP/1.1" 200 OK
-nodo3-1  | INFO: ... "POST /replicate HTTP/1.1" 200 OK
-```
-
----
-
-### Prueba 2: Sincronización Correcta (UPDATE + DELETE)
-
-Actualizar el estado de "online" a "busy":
-
-```bash
-# Obtener el ID del registro creado
-ID=$(curl -s http://localhost:8003/data | jq -r '.[0].id')
-
-# Actualizar al líder
-curl -s -X PUT "http://localhost:8003/data/$ID" \
+# Actualizar
+curl -s -X PUT "http://localhost:80/data/$ID" \
   -H "Content-Type: application/json" \
-  -d '{"data": "{\"extension\": \"101\", \"protocol\": \"SIP\", \"ip_address\": \"192.168.1.50\", \"status\": \"busy\", \"user_agent\": \"Yealink T48S\"}"}' | jq .
+  -H "X-API-Key: cluster-demo-key-2026" \
+  -d '{"data": "{\"extension\": \"101\", \"protocol\": \"SIP\", \"ip_address\": \"192.168.1.50\", \"status\": \"busy\", \"user_agent\": \"Yealink T48S\"}"}'
+
+# Eliminar
+curl -s -X DELETE "http://localhost:80/data/$ID" \
+  -H "X-API-Key: cluster-demo-key-2026"
 ```
 
-Crear un segundo registro:
+### Prueba 4: Fail-over del líder
 
 ```bash
-curl -s -X POST http://localhost:8003/data \
-  -H "Content-Type: application/json" \
-  -d '{"data": "{\"extension\": \"102\", \"protocol\": \"WebRTC\", \"ip_address\": \"192.168.1.51\", \"status\": \"online\", \"user_agent\": \"Jitsi Meet\"}"}' | jq .
-```
+# 1. Identificar líder actual
+curl -s http://localhost:80/health
 
-Verificar consistencia:
-
-```bash
-echo "--- nodo1 ---"
-curl -s http://localhost:8001/data | jq .
-echo "--- nodo2 ---"
-curl -s http://localhost:8002/data | jq .
-echo "--- nodo3 ---"
-curl -s http://localhost:8003/data | jq .
-```
-
-Eliminar el primer registro:
-
-```bash
-curl -s -X DELETE "http://localhost:8003/data/$ID" | jq .
-```
-
-Verificar que el registro desapareció de los 3 nodos.
-
----
-
-### Prueba 3: Caída del Líder + Elección Automática
-
-```bash
-# 1. Identificar el líder actual
-curl -s http://localhost:8003/ | jq .role  # debe decir "leader"
-
-# 2. Detener el líder
+# 2. Matar el líder
 docker stop cluster-distribuido-nodo3-1
 
-# 3. Esperar ~10 segundos (3 heartbeats fallidos)
-sleep 10
+# 3. Esperar detección (~10s: 3 heartbeats × 3s + elección)
+sleep 12
 
-# 4. Verificar que otro nodo asumió el liderazgo
-curl -s http://localhost:8001/ | jq .
-curl -s http://localhost:8002/ | jq .
-```
+# 4. Verificar nuevo líder
+curl -s http://localhost:80/health
 
-Logs esperados:
-
-```
-nodo2-1  | [HEARTBEAT] LÍDER nodo3 declarado MUERTO
-nodo2-1  | [ELECTION] nodo2 se autodeclara LÍDER
-nodo1-1  | ... "POST /leader-announce HTTP/1.1" 200 OK
-```
-
-El nuevo líder será **nodo2** (el de mayor ID entre los vivos).
-
----
-
-### Prueba 4: Continuidad del Servicio
-
-Con el nuevo líder (nodo2), crear datos:
-
-```bash
-curl -s -X POST http://localhost:8002/data \
+# 5. Escribir en el nuevo líder (reintentar hasta acertar)
+curl -s -X POST http://localhost:80/data \
   -H "Content-Type: application/json" \
-  -d '{"data": "{\"extension\": \"103\", \"protocol\": \"PJSIP\", \"ip_address\": \"10.0.0.1\", \"status\": \"online\", \"user_agent\": \"Asterisk\"}"}' | jq .
-```
+  -H "X-API-Key: cluster-demo-key-2026" \
+  -d '{"data": "{\"extension\": \"200\", \"protocol\": \"WebRTC\", \"ip_address\": \"10.0.0.2\", \"status\": \"online\", \"user_agent\": \"Jitsi\"}"}'
 
-Verificar replicación en nodo1:
-
-```bash
-curl -s http://localhost:8001/data | jq .
-```
-
-El servicio continúa funcionando a pesar de la caída del líder original.
-
----
-
-### Prueba 5: Recuperación del Nodo Caído (Sincronización Total)
-
-```bash
-# 1. Levantar nodo3
+# 6. Recuperar el nodo caído
 docker start cluster-distribuido-nodo3-1
-
-# 2. Esperar ~8 segundos (heartbeat detecta recuperación)
 sleep 8
 
-# 3. Verificar que nodo3 se unió como seguidor
-curl -s http://localhost:8003/ | jq .
-# Debe mostrar: "role": "follower", "leader": "nodo2"
-
-# 4. Verificar que nodo3 tiene todos los datos (incluso los creados mientras estuvo caído)
-curl -s http://localhost:8003/data | jq .
+# 7. Verificar que se sincronizó
+curl -s http://localhost:80/data -H "X-API-Key: cluster-demo-key-2026"
 ```
 
-Logs de sincronización:
+### Prueba 5: Seguridad (HTTPS + API Key)
 
+```bash
+# Sin API Key → 401
+curl -s http://localhost:80/data
+
+# API Key incorrecta → 401
+curl -s http://localhost:80/data -H "X-API-Key: wrong"
+
+# HTTPS con cert self-signed
+curl -sk https://localhost:443/data -H "X-API-Key: cluster-demo-key-2026"
 ```
-nodo1-1  | [HEARTBEAT] http://nodo3:8000 RECUPERADO
-nodo2-1  | [HEARTBEAT] http://nodo3:8000 RECUPERADO
-nodo1-1  | [SYNC] Solicitando sincronización total a http://nodo2:8000
-nodo1-1  | [SYNC] Recibidos X registros del líder
-nodo1-1  | [SYNC] Sincronización total completada: X registros insertados
+
+### Prueba 6: Monitoreo
+
+```bash
+# cAdvisor — métricas de contenedores
+curl -s http://localhost:8080/metrics | head -5
+
+# Prometheus — targets de scraping
+curl -s 'http://localhost:9090/api/v1/targets' | python3 -m json.tool
+
+# Grafana — login (admin/admin)
+http://localhost:3000
+```
+
+### Smoke test automatizado
+
+```bash
+bash tests/smoke_test.sh
+```
+
+### Benchmark de rendimiento
+
+```bash
+pip install httpx  # si no está instalado
+python3 tests/benchmark.py http://localhost 200 10
 ```
 
 ---
 
-### Prueba 6: Partición de Red (Opcional)
+## Documentación
 
-Simular un aislamiento de red real sin detener el proceso:
+| Documento | Descripción |
+|---|---|
+| `docs/arquitectura.md` | Diagramas C4 (Contexto, Contenedores, Componentes, Código/3PC) |
+| `docs/plan-proyecto.md` | Plan detallado de 5 fases |
+| `docs/checklist-instalacion.md` | Checklist de 24 items post-deploy |
+| `docs/politicas-seguridad.md` | Políticas: API Key, HTTPS, firewall, hardening |
+| `docs/pruebas-ha.md` | 7 pruebas de alta disponibilidad documentadas |
+| `docs/monitoreo.md` | Stack Prometheus/cAdvisor/Grafana, consultas PromQL |
+| `docs/reporte-rendimiento.md` | Latencia, throughput, fail-over, análisis crítico |
+| `docs/manual-operacion.md` | Instalación, operación, mantenimiento, solución de problemas |
+| `docs/glosario.md` | 30+ términos técnicos definidos |
+| `docs/apendice-comandos.md` | Comandos por categoría (Docker, curl, Git, Ansible) |
+| `docs/informe-final.pdf` | PDF completo con todos los documentos anteriores |
+| `docs/presentacion.md` | Slides de presentación |
+
+---
+
+## Despliegue con Ansible (VM remota)
 
 ```bash
-# 1. Identificar el nombre de la red Docker
-docker network ls
-# Buscar: cluster-distribuido_cluster-net o similar
+# 1. Editar inventario con IP real
+nano ansible/inventory.ini
 
-# 2. Aislar nodo2 de la red
-docker network disconnect cluster-distribuido_cluster-net cluster-distribuido-nodo2-1
+# 2. Provisionar VM
+ansible-playbook -i ansible/inventory.ini ansible/playbook-provision.yml
 
-# 3. Verificar que nodo3 asume liderazgo
-curl -s http://localhost:8003/ | jq .
-
-# 4. Intentar escribir en nodo1 (seguidor) → 503
-curl -s -X POST http://localhost:8001/data \
-  -H "Content-Type: application/json" \
-  -d '{"data": "{\"extension\": \"199\", \"protocol\": \"SIP\", \"ip_address\": \"10.0.0.99\", \"status\": \"online\", \"user_agent\": \"Test\"}"}' | jq .
-
-# 5. Reconectar nodo2
-docker network connect cluster-distribuido_cluster-net cluster-distribuido-nodo2-1
-sleep 8
-
-# 6. Verificar que se reincorpora correctamente
-curl -s http://localhost:8002/ | jq .
-curl -s http://localhost:8002/data | jq .
+# 3. Desplegar clúster
+ansible-playbook -i ansible/inventory.ini ansible/playbook-deploy.yml
 ```
 
 ---
 
-## Solución de Problemas
+## Estructura del Proyecto
 
-### Error: `unable to open database file`
-
-El directorio `/app/data` no tiene permisos para `appuser`. Solución incluida en el Dockerfile (crea el directorio con `chown` antes del `USER appuser`). Si persiste, verificar:
-
-```bash
-docker compose build --no-cache
+```
+Cluster-distribuido/
+├── ansible/                    # IaC: playbooks de Ansible
+├── app/                        # Código de cada nodo
+│   ├── api/                    #   Routers FastAPI
+│   ├── core/                   #   Config + SQLite
+│   ├── domain/                 #   Modelos Pydantic
+│   └── services/               #   3PC, Bully, node_client
+├── certs/                      # Certificados SSL (gitignored)
+├── docs/                       # Documentación técnica
+├── monitoring/                 # Config de Prometheus
+├── scripts/                    # Scripts auxiliares
+├── tests/                      # Smoke test + benchmark
+├── docker-compose.yml          # 7 servicios
+├── Dockerfile                  # python:3.11-slim + curl
+└── nginx.conf                  # LB con HTTPS
 ```
 
-### Error: `Attribute "app" not found in module`
+---
 
-El archivo `app/main.py` está vacío o tiene errores de importación. Verificar que la estructura de carpetas coincida con los imports en `main.py`.
+## Stack Tecnológico
 
-### Error: `Cannot connect to the Docker daemon`
+| Componente | Tecnología |
+|---|---|
+| Lenguaje | Python 3.11 |
+| API | FastAPI + Uvicorn |
+| Base de datos | SQLite (WAL) |
+| Comunicación entre nodos | httpx (AsyncClient) |
+| Consenso | 3PC (Three-Phase Commit) |
+| Elección de líder | Bully Algorithm |
+| Balanceador | nginx:alpine |
+| Contenedores | Docker + Docker Compose |
+| Monitoreo | cAdvisor + Prometheus + Grafana |
+| Orquestación | Ansible |
+| Seguridad | API Key + HTTPS (self-signed) |
 
-En Linux, asegurar que el servicio está corriendo:
+---
 
-```bash
-sudo systemctl enable --now docker
-```
-
-En Windows, abrir Docker Desktop y esperar a que el motor inicie.
-
-### Error: `network cluster-net not found`
-
-Docker Compose asigna un prefijo al nombre de red. Usar:
-
-```bash
-docker network ls | grep cluster
-docker network disconnect <nombre-exacto> <contenedor>
-```
-
-### Error: `Replication quorum failed`
-
-El líder necesitaba ACK de al menos 2 nodos pero no lo consiguió (ej: 2 nodos vivos pero uno no responde). El líder se auto-degrada a seguidor. Verificar que todos los contenedores estén en ejecución:
-
-```bash
-docker ps
-```
+*Proyecto de Sistemas Distribuidos 2026 — Clúster de servicios web con registro de endpoints VoIP.*

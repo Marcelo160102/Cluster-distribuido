@@ -14,11 +14,27 @@ from app.services.node_client import health_check, cluster_sync
 from app.api.routes_cluster import router as cluster_router
 from app.api.routes_data import router as data_router
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import generate_latest, REGISTRY, Counter, Gauge, Histogram
+
+REQUEST_COUNT = Counter("app_requests_total", "Total de solicitudes al nodo", ["method", "endpoint"])
+ACTIVE_REQUESTS = Gauge("app_active_requests", "Solicitudes activas en el nodo")
+REQUEST_LATENCY = Histogram("app_request_latency_seconds", "Latencia de solicitudes por endpoint", ["method", "endpoint"])
+LEADER_GAUGE = Gauge("app_is_leader", "1 si este nodo es el líder, 0 si es seguidor")
+RECORDS_GAUGE = Gauge("app_records_total", "Registros en la base de datos local")
 
 app = FastAPI(title="Nodo del Clúster Distribuido", version="1.0.0")
 app.include_router(cluster_router)
 app.include_router(data_router)
+
+
+@app.get("/metrics")
+async def metrics():
+    """Expone métricas en formato Prometheus."""
+    LEADER_GAUGE.set(1 if cfg.IS_LEADER else 0)
+    from app.core.database import get_all as db_get_all
+    RECORDS_GAUGE.set(len(db_get_all()))
+    return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
 
 
 @app.middleware("http")
@@ -32,6 +48,18 @@ async def api_key_middleware(request: Request, call_next):
                 content={"detail": "API Key inválida"},
             )
     return await call_next(request)
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Registra métricas de solicitudes para Prometheus."""
+    ACTIVE_REQUESTS.inc()
+    REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path).inc()
+    with REQUEST_LATENCY.labels(method=request.method, endpoint=request.url.path).time():
+        response = await call_next(request)
+    ACTIVE_REQUESTS.dec()
+    return response
+
 
 # Registro de intentos fallidos y estado de conectividad por peer
 failed_attempts: dict[str, int] = {}
