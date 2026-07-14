@@ -67,6 +67,8 @@ volumes:
   nodo1_data:
   nodo2_data:
   nodo3_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   cluster-net:
