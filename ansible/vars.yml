@@ -1,0 +1,6 @@
+---
+# Variables para el despliegue del clúster
+repo_url: git@github.com:Marcelo160102/Cluster-distribuido.git
+branch: main
+deploy_path: /opt/cluster
+cluster_port: 80

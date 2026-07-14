@@ -1,0 +1,75 @@
+---
+- name: Provisionar VM para el clúster distribuido
+  hosts: cluster
+  become: yes
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - name: Actualizar índice de paquetes
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Instalar dependencias del sistema
+      apt:
+        name:
+          - docker.io
+          - docker-compose-plugin
+          - python3
+          - python3-pip
+          - git
+          - curl
+          - ufw
+          - openssl
+        state: present
+
+    - name: Habilitar e iniciar Docker
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Agregar usuario al grupo docker
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Configurar UFW — puerto 80 (HTTP)
+      ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+    - name: Configurar UFW — puerto 443 (HTTPS)
+      ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+
+    - name: Configurar UFW — puerto 22 (SSH)
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Habilitar UFW
+      ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+    - name: Instalar httpx para smoke tests locales
+      pip:
+        name: httpx
+        state: present
+
+    - name: Verificar instalación de Docker
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Mostrar versión de Docker
+      debug:
+        msg: "Docker instalado: {{ docker_version.stdout }}"

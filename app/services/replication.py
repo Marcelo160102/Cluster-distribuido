@@ -68,7 +68,7 @@ async def replicate_to_followers(operation: str, data: str | None = None, item_i
     tasks_do_commit = [send_3pc_phase(peer, phase="do_commit", payload={"tx_id": tx_id}) for peer in peers]
     
     # Lanzamos las confirmaciones a los seguidores de fondo (No bloqueante)
-    asyncio.create_task(asyncio.gather(*tasks_do_commit, return_exceptions=True))
+    await asyncio.gather(*tasks_do_commit, return_exceptions=True)
     
     # Retorna True para indicarle a 'routes_data.py' que la transacción fue exitosa
     # y proceda de inmediato con la escritura local final.

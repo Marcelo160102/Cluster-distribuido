@@ -47,3 +47,70 @@ async def send_3pc_phase(peer_url: str, phase: str, payload: dict) -> bool:
         except (httpx.RequestError, httpx.TimeoutException) as e:
             print(f"[CLIENT-3PC] Error de red al conectar con {peer_url} en fase {phase}: {str(e)}")
             return False
+
+
+# =======================================================================
+#  Funciones de salud, sincronización y elección (Bully Algorithm)
+# =======================================================================
+
+async def health_check(node_url: str) -> dict | None:
+    """Consulta GET /health de un peer.
+    
+    Returns:
+        dict con node_id, role, status si OK; None si falla.
+    """
+    url = f"{node_url}/health"
+    async with httpx.AsyncClient(timeout=TIMEOUT_CONFIG) as client:
+        try:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                return resp.json()
+        except (httpx.RequestError, httpx.TimeoutException):
+            pass
+    return None
+
+
+async def cluster_sync(leader_url: str) -> list | None:
+    """Descarga la lista completa de registros desde GET /cluster/sync.
+    
+    Returns:
+        list[dict] con los registros; None si falla.
+    """
+    url = f"{leader_url}/cluster/sync"
+    async with httpx.AsyncClient(timeout=TIMEOUT_CONFIG) as client:
+        try:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                return resp.json()
+        except (httpx.RequestError, httpx.TimeoutException):
+            pass
+    return None
+
+
+async def send_election(node_url: str, msg: dict) -> bool:
+    """Envía un mensaje ELECTION a un peer (POST /election).
+    
+    Returns:
+        True si el peer respondió OK, False en otro caso.
+    """
+    url = f"{node_url}/election"
+    async with httpx.AsyncClient(timeout=TIMEOUT_CONFIG) as client:
+        try:
+            resp = await client.post(url, json=msg)
+            data = resp.json()
+            return data.get("response") == "OK"
+        except (httpx.RequestError, httpx.TimeoutException):
+            return False
+
+
+async def announce_leader(node_url: str, leader_id: str) -> None:
+    """Anuncia un nuevo líder (POST /leader-announce).
+    
+    Es fire-and-forget; no se espera confirmación.
+    """
+    url = f"{node_url}/leader-announce"
+    async with httpx.AsyncClient(timeout=TIMEOUT_CONFIG) as client:
+        try:
+            await client.post(url, json={"leader_id": leader_id})
+        except (httpx.RequestError, httpx.TimeoutException):
+            pass

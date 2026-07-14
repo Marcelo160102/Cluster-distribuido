@@ -19,7 +19,7 @@ tx_buffer: dict[str, dict] = {}
 async def health():
     """Responde con el estado actual del nodo (usado por heartbeats de peers)."""
     role = "leader" if cfg.IS_LEADER else "follower"
-    return {"node_id": cfg.NODE_ID, "role": role, "status": "alive"}[cite: 8]
+    return {"node_id": cfg.NODE_ID, "role": role, "status": "alive"}
 
 
 # =======================================================================
@@ -108,19 +108,19 @@ async def abort(payload: dict):
 async def election(msg: ElectionMessage):
     """Recibe un mensaje de elección Bully."""
     if cfg.NODE_ID > msg.candidate_id:
-        return {"response": "OK", "from": cfg.NODE_ID}[cite: 8]
-    return {"response": "IGNORE"}[cite: 8]
+        return {"response": "OK", "from": cfg.NODE_ID}
+    return {"response": "IGNORE"}
 
 
 @router.post("/leader-announce")
 async def leader_announce(payload: dict):
     """Recibe el anuncio de un nuevo líder y actualiza LEADER_ID local."""
-    cfg.LEADER_ID = payload.get("leader_id")[cite: 8]
-    return {"status": "ack", "leader": cfg.LEADER_ID}[cite: 8]
+    cfg.LEADER_ID = payload.get("leader_id")
+    return {"status": "ack", "leader": cfg.LEADER_ID}
 
 
 @router.get("/cluster/sync")
 async def cluster_sync():
     """Retorna el listado completo de endpoints VoIP (sincronización total)."""
-    items = get_all()[cite: 8]
-    return items[cite: 8]
+    items = get_all()
+    return items
