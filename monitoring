@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 2s # Intervalo rápido para capturar caídas exactas durante los fail-overs
+
+scrape_configs:
+  - job_name: 'cluster-containers'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: 'cluster-nodes-app'
+    static_configs:
+      - targets: ['nodo1:8000', 'nodo2:8000', 'nodo3:8000']
