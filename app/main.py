@@ -13,11 +13,25 @@ from app.services.leader_election import start_election
 from app.services.node_client import health_check, cluster_sync
 from app.api.routes_cluster import router as cluster_router
 from app.api.routes_data import router as data_router
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 app = FastAPI(title="Nodo del Clúster Distribuido", version="1.0.0")
 app.include_router(cluster_router)
 app.include_router(data_router)
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Valida API Key en endpoints públicos /data (Fase 3: Seguridad)."""
+    if request.url.path.startswith("/data"):
+        key = request.headers.get("X-API-Key")
+        if key != cfg.API_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "API Key inválida"},
+            )
+    return await call_next(request)
 
 # Registro de intentos fallidos y estado de conectividad por peer
 failed_attempts: dict[str, int] = {}

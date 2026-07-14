@@ -23,6 +23,7 @@ services:
       - NODE_ID=nodo1
       - NODE_PORT=8000
       - PEERS=http://nodo2:8000,http://nodo3:8000
+      - API_KEY=${API_KEY:-cluster-demo-key-2026}
     volumes:
       - nodo1_data:/app/data
 
@@ -32,6 +33,7 @@ services:
       - NODE_ID=nodo2
       - NODE_PORT=8000
       - PEERS=http://nodo1:8000,http://nodo3:8000
+      - API_KEY=${API_KEY:-cluster-demo-key-2026}
     volumes:
       - nodo2_data:/app/data
 
@@ -41,6 +43,7 @@ services:
       - NODE_ID=nodo3
       - NODE_PORT=8000
       - PEERS=http://nodo1:8000,http://nodo2:8000
+      - API_KEY=${API_KEY:-cluster-demo-key-2026}
     volumes:
       - nodo3_data:/app/data
 
@@ -48,9 +51,11 @@ services:
   loadbalancer:
     image: nginx:alpine
     ports:
-      - "80:80"  # Punto de entrada único
+      - "80:80"    # Redirige a HTTPS
+      - "443:443"  # HTTPS
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
     depends_on:
       nodo1:
         condition: service_healthy

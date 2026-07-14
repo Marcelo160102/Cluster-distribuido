@@ -23,3 +23,6 @@ MAX_FAILED_ATTEMPTS: int = 3            # intentos fallidos antes de declarar mu
 
 # Flag explícito de liderazgo (se setea en become_leader / se limpia en degradación)
 IS_LEADER: bool = False
+
+# --- Autenticación (Fase 3: Seguridad) ---
+API_KEY: str = os.environ.get("API_KEY", "cluster-demo-key-2026")
