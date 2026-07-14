@@ -1,6 +1,6 @@
 version: '3.8'
 
-# Base común para evitar repetir código en cada nodo (Principio DRY)
+# 1. DRY (Don't Repeat Yourself): Uso de anclas (anchors) para evitar repetir código.
 x-node-common: &node-common
   build: .
   networks:
@@ -10,7 +10,7 @@ x-node-common: &node-common
     interval: 5s
     timeout: 3s
     retries: 3
-  # Límites estrictos para evaluar el rendimiento bajo condiciones controladas
+  # 2. Límites de recursos: Clave para pruebas de rendimiento controladas.
   deploy:
     resources:
       limits:
@@ -21,8 +21,6 @@ services:
   # --- Nodos del Clúster ---
   nodo1:
     <<: *node-common
-    ports:
-      - "8001:8000"
     environment:
       - NODE_ID=nodo1
       - NODE_PORT=8000
@@ -32,8 +30,6 @@ services:
 
   nodo2:
     <<: *node-common
-    ports:
-      - "8002:8000"
     environment:
       - NODE_ID=nodo2
       - NODE_PORT=8000
@@ -43,8 +39,6 @@ services:
 
   nodo3:
     <<: *node-common
-    ports:
-      - "8003:8000"
     environment:
       - NODE_ID=nodo3
       - NODE_PORT=8000
@@ -52,11 +46,11 @@ services:
     volumes:
       - nodo3_data:/app/data
 
-  # --- Balanceador de Carga (Punto de Entrada) ---
+  # --- Balanceador de Carga (Fase 3: Alta Disponibilidad) ---
   loadbalancer:
     image: nginx:alpine
     ports:
-      - "80:80"
+      - "80:80"  # Punto de entrada único
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -68,51 +62,6 @@ services:
         condition: service_healthy
     networks:
       - cluster-net
-
-  # --- Infraestructura de Monitorización ---
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
-    container_name: cluster-cadvisor
-    restart: unless-stopped
-    privileged: true
-    devices:
-      - /dev/kmsg
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
-    networks:
-      - cluster-net
-
-  prometheus:
-    image: prom/prometheus:v2.51.0
-    container_name: cluster-prometheus
-    restart: unless-stopped
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-    networks:
-      - cluster-net
-    depends_on:
-      - cadvisor
-
-  grafana:
-    image: grafana/grafana-oss:10.4.1
-    container_name: cluster-grafana
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-    networks:
-      - cluster-net
-    depends_on:
-      - prometheus
 
 volumes:
   nodo1_data:
