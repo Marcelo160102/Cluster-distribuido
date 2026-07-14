@@ -57,9 +57,9 @@ def get_by_id(item_id: str) -> dict | None:
         return dict(row) if row else None
 
 
-def create(data: str) -> dict:
-    """Inserta un nuevo registro con UUID autogenerado."""
-    item_id = str(uuid.uuid4())
+def create(data: str, item_id: str | None = None) -> dict:
+    """Inserta un nuevo registro con UUID autogenerado (o provisto por el líder en 3PC)."""
+    item_id = item_id or str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute(
