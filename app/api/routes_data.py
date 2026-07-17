@@ -1,9 +1,10 @@
 """Routers públicos de datos (CRUD de endpoints VoIP).
 
 Las operaciones de escritura (POST, PUT, DELETE) solo son aceptadas
-por el nodo líder. Los seguidores responden 503 indicando quién es el líder.
+por el nodo líder. Los seguidores redirigen al líder con 307.
 """
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import RedirectResponse
 
 import app.core.config as cfg
 from app.core.database import get_all, get_by_id, create, update, delete
