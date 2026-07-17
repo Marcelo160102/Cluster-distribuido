@@ -137,36 +137,37 @@ C4Context
 C4Container
     title Diagrama de Contenedores — Clúster VoIP Distribuido
 
-    Person(cliente, "Cliente", "curl / hey / aplicación")
+    Person(cliente, "Cliente", "curl / hey / app")
 
     Container_Boundary(nginx, "Balanceador de Carga") {
-        Container(lb, "nginx LB", "nginx:alpine", "Distribuye tráfico HTTP en round-robin, termina TLS")
+        Container(lb, "nginx LB", "nginx:alpine", "Round-robin + TLS")
     }
 
     Container_Boundary(nodos, "Nodos del Clúster") {
-        Container(nodo1, "nodo1", "FastAPI + Uvicorn", "Python 3.11, asíncrono, puede ser líder o seguidor")
-        Container(nodo2, "nodo2", "FastAPI + Uvicorn", "Python 3.11, asíncrono, puede ser líder o seguidor")
-        Container(nodo3, "nodo3", "FastAPI + Uvicorn", "Python 3.11, asíncrono, puede ser líder o seguidor")
+        Container(nodo1, "nodo1", "FastAPI + Uvicorn", "Puede ser líder o seguidor")
+        Container(nodo2, "nodo2", "FastAPI + Uvicorn", "Puede ser líder o seguidor")
+        Container(nodo3, "nodo3", "FastAPI + Uvicorn", "Puede ser líder o seguidor")
     }
 
     Container_Boundary(monitoreo, "Monitoreo") {
-        Container(cadvisor, "cAdvisor", "gcr.io/cadvisor", "Métricas de uso de recursos por contenedor")
-        Container(prom, "Prometheus", "prom/prometheus", "Almacenamiento y consulta de métricas")
-        Container(grafana, "Grafana", "grafana/grafana", "Dashboards visuales de monitoreo")
+        Container(cadvisor, "cAdvisor", "gcr.io/cadvisor", "Métricas de contenedores")
+        Container(prom, "Prometheus", "prom/prometheus", "Almacenamiento de métricas")
+        Container(grafana, "Grafana", "grafana/grafana", "Dashboards visuales")
     }
 
-    Rel(cliente, lb, "HTTP/HTTPS :80/:443")
-    Rel(lb, nodo1, "proxy_pass http://cluster_nodos", "round-robin")
-    Rel(lb, nodo2, "proxy_pass http://cluster_nodos", "round-robin")
-    Rel(lb, nodo3, "proxy_pass http://cluster_nodos", "round-robin")
-    Rel(nodo1, nodo2, "3PC + Bully + Heartbeat", "HTTP (httpx)")
-    Rel(nodo2, nodo3, "3PC + Bully + Heartbeat", "HTTP (httpx)")
-    Rel(nodo1, nodo3, "3PC + Bully + Heartbeat", "HTTP (httpx)")
-    Rel(cadvisor, prom, "scrape :8080/metrics", "HTTP cada 2s")
-    Rel(prom, nodo1, "scrape :8000/health", "HTTP cada 2s")
-    Rel(prom, nodo2, "scrape :8000/health", "HTTP cada 2s")
-    Rel(prom, nodo3, "scrape :8000/health", "HTTP cada 2s")
-    Rel(prom, grafana, "fuente de datos", "consulta HTTP")
+    Rel(cliente, lb, "HTTP/HTTPS", ":80/:443")
+    Rel(lb, nodo1, "proxy_pass", "round-robin")
+    Rel(lb, nodo2, "proxy_pass", "round-robin")
+    Rel(lb, nodo3, "proxy_pass", "round-robin")
+    Rel(nodo1, nodo2, "3PC / Bully / HB", "httpx")
+    Rel(nodo2, nodo3, "3PC / Bully / HB", "httpx")
+    Rel(nodo1, nodo3, "3PC / Bully / HB", "httpx")
+    Rel(cadvisor, prom, "scrape metrics", ":8080/metrics")
+    Rel(prom, nodo1, "scrape health", ":8000/health")
+    Rel(prom, nodo2, "scrape health", ":8000/health")
+    Rel(prom, nodo3, "scrape health", ":8000/health")
+    Rel(prom, grafana, "fuente de datos", "consultas HTTP")
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="2")
 ```
 
 ### 4.3 C3 — Diagrama de Componentes (dentro de un nodo)
@@ -176,29 +177,41 @@ C4Component
     title Diagrama de Componentes — Nodo del Clúster (nodo1)
 
     Container_Boundary(nodo, "nodo1") {
-        Component(api_data, "routes_data.py", "FastAPI Router", "Endpoints CRUD públicos: /data (GET, POST, PUT, DELETE)")
-        Component(api_cluster, "routes_cluster.py", "FastAPI Router", "Endpoints internos: /health, /election, /leader-announce, /cluster/sync, /cluster/3pc/*")
-        Component(replication, "replication.py", "Módulo Python", "Coordinación 3PC: CanCommit → PreCommit → DoCommit")
-        Component(election, "leader_election.py", "Módulo Python", "Algoritmo Bully: detección de caída, elección, autodeclaración")
-        Component(node_client, "node_client.py", "Cliente HTTP async", "httpx.AsyncClient para comunicación inter-nodo")
-        Component(database, "database.py", "SQLite + WAL", "Persistencia local con PRAGMA WAL, consultas parametrizadas")
-        Component(config, "config.py", "Variables de módulo", "NODE_ID, PEERS, LEADER_ID, timers, flags")
-        Component(main, "main.py", "FastAPI App", "Punto de entrada: startup, heartbeat_loop, middleware")
-        Component(heartbeat, "heartbeat_loop", "asyncio task", "Monitorea peers cada HEARTBEAT_INTERVAL segundos")
+        Component_Boundary(api, "API (FastAPI Routers)") {
+            Component(api_data, "routes_data.py", "FastAPI", "CRUD público: /data")
+            Component(api_cluster, "routes_cluster.py", "FastAPI", "Interno: /health, /3pc")
+        }
+
+        Component_Boundary(srv, "Servicios de Clúster") {
+            Component(replication, "replication.py", "Módulo", "3PC: CanCommit→DoCommit")
+            Component(election, "leader_election.py", "Módulo", "Algoritmo Bully")
+            Component(node_client, "node_client.py", "Cliente", "httpx.AsyncClient")
+        }
+
+        Component_Boundary(data, "Datos y Config") {
+            Component(database, "database.py", "SQLite WAL", "Persistencia local")
+            Component(config, "config.py", "Módulo", "NODE_ID, PEERS, flags")
+        }
+
+        Component_Boundary(core, "Core") {
+            Component(main, "main.py", "FastAPI App", "Entrada + middleware")
+            Component(heartbeat, "heartbeat_loop", "asyncio task", "Monitoreo de peers")
+        }
     }
 
-    Rel(api_data, config, "Lee", "IS_LEADER, LEADER_ID")
-    Rel(api_data, database, "CRUD", "create, update, delete, get_all, get_by_id")
-    Rel(api_data, replication, "replicate_to_followers()", "3PC")
-    Rel(api_cluster, config, "Lee/Actualiza", "NODE_ID, LEADER_ID, IS_LEADER")
+    Rel(api_data, config, "Lee", "IS_LEADER")
+    Rel(api_data, database, "CRUD", "create / update / delete")
+    Rel(api_data, replication, "replicate()", "3PC")
+    Rel(api_cluster, config, "Lee/Actualiza", "LEADER_ID")
     Rel(api_cluster, database, "get_all()", "sync")
     Rel(replication, node_client, "send_3pc_phase()", "httpx")
-    Rel(election, node_client, "send_election(), announce_leader()", "httpx")
+    Rel(election, node_client, "send_election()", "httpx")
     Rel(heartbeat, node_client, "health_check()", "httpx")
     Rel(heartbeat, election, "start_election()", "caída detectada")
-    Rel(heartbeat, database, "sync_from_leader()", "delete_all + insert_many")
+    Rel(heartbeat, database, "sync_from_leader()", "delete_all+insert_many")
     Rel(main, config, "Inicializa", "startup")
     Rel(main, heartbeat, "create_task()", "background loop")
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="2")
 ```
 
 ### 4.4 C4 — Diagrama de Código (Flujo 3PC)
@@ -210,43 +223,39 @@ sequenceDiagram
     participant F1 as Seguidor (nodo2)
     participant F2 as Seguidor (nodo3)
 
-    C->>L: POST /data (VoIP endpoint)
+    C->>L: POST /data (payload)
     activate L
-
-    Note over L: 1. Validar API Key
-    Note over L: 2. Generar tx_id global
-    Note over L: 3. Elegir líder (this node)
 
     rect rgb(200, 220, 250)
         Note over L,F2: FASE 1: CAN_COMMIT
-        L->>F1: POST /cluster/3pc/can_commit {tx_id, operation, data}
-        L->>F2: POST /cluster/3pc/can_commit {tx_id, operation, data}
-        F1-->>L: {"vote": "YES"}
-        F2-->>L: {"vote": "YES"}
-        Note over L: Votos: Sí propio + 2 = 3/3 ≥ 2 (quórum)
+        L->>F1: POST /3pc/can_commit {tx_id, op, data}
+        L->>F2: POST /3pc/can_commit {tx_id, op, data}
+        F1-->>L: {vote: YES}
+        F2-->>L: {vote: YES}
+        Note over L: Votos: 1 (líder) + 2 = 3 ≥ 2
     end
 
     rect rgb(220, 240, 200)
         Note over L,F2: FASE 2: PRE_COMMIT
-        L->>F1: POST /cluster/3pc/pre_commit {tx_id}
-        L->>F2: POST /cluster/3pc/pre_commit {tx_id}
-        F1-->>L: {"status": "ACK"}
-        F2-->>L: {"status": "ACK"}
-        Note over L: Preparación confirmada (ACKs 3/3)
+        L->>F1: POST /3pc/pre_commit {tx_id}
+        L->>F2: POST /3pc/pre_commit {tx_id}
+        F1-->>L: {status: ACK}
+        F2-->>L: {status: ACK}
+        Note over L: Preparación confirmada
     end
 
     rect rgb(250, 220, 200)
         Note over L,F2: FASE 3: DO_COMMIT
-        L->>F1: POST /cluster/3pc/do_commit {tx_id}
-        L->>F2: POST /cluster/3pc/do_commit {tx_id}
-        Note over L: Escritura local en SQLite
-        Note over F1: Consolida en SQLite
-        Note over F2: Consolida en SQLite
-        F1-->>L: {"status": "committed"}
-        F2-->>L: {"status": "committed"}
+        L->>F1: POST /3pc/do_commit {tx_id}
+        L->>F2: POST /3pc/do_commit {tx_id}
+        Note over L: Escribe en SQLite
+        Note over F1: Consolida SQLite
+        Note over F2: Consolida SQLite
+        F1-->>L: {status: committed}
+        F2-->>L: {status: committed}
     end
 
-    L-->>C: 200 {"id": ..., "data": ..., ...}
+    L-->>C: 201 Created (id, data)
     deactivate L
 ```
 
@@ -308,7 +317,7 @@ sequenceDiagram
                     └──────┬───────┘
                            ▼
                ┌───────────────────────┐
-               │ Nodo i detecta caída  │
+               │ Nodo detecta caída    │
                │ (MAX_FAILED_ATTEMPTS) │
                └──────────┬────────────┘
                           ▼
@@ -324,11 +333,11 @@ sequenceDiagram
               └──────┬────────┬───────┘
                      │ NO     │ SÍ
                      ▼        ▼
-              ┌──────────┐  ┌──────────────────┐
-              │ Soy líder│  │ Otro toma control│
-              │ become_leader() │ (esperar anuncio)│
-              │ announce │  └──────────────────┘
-              └──────────┘
+              ┌────────────────────┐  ┌──────────────────────┐
+              │ Soy líder          │  │ Otro toma control    │
+              │ become_leader()    │  │ (esperar anuncio)    │
+              │ announce()         │  └──────────────────────┘
+              └────────────────────┘
 ```
 
 ### 7.2 Reglas
