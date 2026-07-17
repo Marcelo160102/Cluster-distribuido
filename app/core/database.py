@@ -79,7 +79,11 @@ def update(item_id: str, data: str) -> dict | None:
         )
         if cursor.rowcount == 0:
             return None
-    return {"id": item_id, "data": data, "updated_at": now}
+        row = conn.execute(
+            "SELECT id, data, created_at, updated_at FROM items WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+    return dict(row)
 
 
 def delete(item_id: str) -> bool:
