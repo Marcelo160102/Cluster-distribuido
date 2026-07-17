@@ -95,7 +95,7 @@ curl -s http://localhost:80/
 ### Prueba 2: Crear endpoint VoIP (replicación 3PC)
 
 ```bash
-# Crear (puede requerir reintentos hasta dar con el líder vía round-robin)
+# Crear (nginx reintenta automáticamente si recibe 503 de un seguidor)
 curl -s -X POST http://localhost:80/data \
   -H "Content-Type: application/json" \
   -H "X-API-Key: cluster-demo-key-2026" \
@@ -137,7 +137,7 @@ sleep 12
 # 4. Verificar nuevo líder
 curl -s http://localhost:80/health
 
-# 5. Escribir en el nuevo líder (reintentar hasta acertar)
+# 5. Escribir en el nuevo líder (nginx reintenta automáticamente si cae en seguidor)
 curl -s -X POST http://localhost:80/data \
   -H "Content-Type: application/json" \
   -H "X-API-Key: cluster-demo-key-2026" \
@@ -196,18 +196,8 @@ python3 tests/benchmark.py http://localhost 200 10
 
 | Documento | Descripción |
 |---|---|
+| `docs/INFORME-COMPLETO.md` | Informe técnico consolidado con toda la documentación del proyecto |
 | `docs/arquitectura.md` | Diagramas C4 (Contexto, Contenedores, Componentes, Código/3PC) |
-| `docs/plan-proyecto.md` | Plan detallado de 5 fases |
-| `docs/checklist-instalacion.md` | Checklist de 24 items post-deploy |
-| `docs/politicas-seguridad.md` | Políticas: API Key, HTTPS, firewall, hardening |
-| `docs/pruebas-ha.md` | 7 pruebas de alta disponibilidad documentadas |
-| `docs/monitoreo.md` | Stack Prometheus/cAdvisor/Grafana, consultas PromQL |
-| `docs/reporte-rendimiento.md` | Latencia, throughput, fail-over, análisis crítico |
-| `docs/manual-operacion.md` | Instalación, operación, mantenimiento, solución de problemas |
-| `docs/glosario.md` | 30+ términos técnicos definidos |
-| `docs/apendice-comandos.md` | Comandos por categoría (Docker, curl, Git, Ansible) |
-| `docs/informe-final.pdf` | PDF completo con todos los documentos anteriores |
-| `docs/presentacion.md` | Slides de presentación |
 
 ---
 
@@ -236,14 +226,14 @@ Cluster-distribuido/
 │   ├── core/                   #   Config + SQLite
 │   ├── domain/                 #   Modelos Pydantic
 │   └── services/               #   3PC, Bully, node_client
-├── certs/                      # Certificados SSL (gitignored)
-├── docs/                       # Documentación técnica
+├── docs/                       # Documentación técnica (INFORME-COMPLETO.md, arquitectura.md)
 ├── monitoring/                 # Config de Prometheus
-├── scripts/                    # Scripts auxiliares
+├── scripts/                    # Scripts auxiliares (gen-certs.sh)
 ├── tests/                      # Smoke test + benchmark
 ├── docker-compose.yml          # 7 servicios
 ├── Dockerfile                  # python:3.11-slim + curl
-└── nginx.conf                  # LB con HTTPS
+├── nginx.conf                  # LB con proxy_next_upstream + HTTPS
+└── .gitignore                  # Ignora certs/, docs/archive/
 ```
 
 ---
