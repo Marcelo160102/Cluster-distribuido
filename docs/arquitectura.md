@@ -167,7 +167,7 @@ C4Container
     Rel(prom, nodo2, "scrape health", ":8000/health")
     Rel(prom, nodo3, "scrape health", ":8000/health")
     Rel(prom, grafana, "fuente de datos", "consultas HTTP")
-    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="2")
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
 
 ### 4.3 C3 — Diagrama de Componentes (dentro de un nodo)
@@ -177,26 +177,19 @@ C4Component
     title Diagrama de Componentes — Nodo del Clúster (nodo1)
 
     Container_Boundary(nodo, "nodo1") {
-        Component_Boundary(api, "API (FastAPI Routers)") {
-            Component(api_data, "routes_data.py", "FastAPI", "CRUD público: /data")
-            Component(api_cluster, "routes_cluster.py", "FastAPI", "Interno: /health, /3pc")
-        }
 
-        Component_Boundary(srv, "Servicios de Clúster") {
-            Component(replication, "replication.py", "Módulo", "3PC: CanCommit→DoCommit")
-            Component(election, "leader_election.py", "Módulo", "Algoritmo Bully")
-            Component(node_client, "node_client.py", "Cliente", "httpx.AsyncClient")
-        }
+        Component(api_data, "routes_data.py", "FastAPI", "CRUD público: /data")
+        Component(api_cluster, "routes_cluster.py", "FastAPI", "Interno: /health, /3pc")
 
-        Component_Boundary(data, "Datos y Config") {
-            Component(database, "database.py", "SQLite WAL", "Persistencia local")
-            Component(config, "config.py", "Módulo", "NODE_ID, PEERS, flags")
-        }
+        Component(replication, "replication.py", "Módulo", "3PC: CanCommit→DoCommit")
+        Component(election, "leader_election.py", "Módulo", "Algoritmo Bully")
+        Component(node_client, "node_client.py", "Cliente", "httpx.AsyncClient")
 
-        Component_Boundary(core, "Core") {
-            Component(main, "main.py", "FastAPI App", "Entrada + middleware")
-            Component(heartbeat, "heartbeat_loop", "asyncio task", "Monitoreo de peers")
-        }
+        Component(database, "database.py", "SQLite WAL", "Persistencia local")
+        Component(config, "config.py", "Módulo", "NODE_ID, PEERS, flags")
+
+        Component(main, "main.py", "FastAPI App", "Entrada + middleware")
+        Component(heartbeat, "heartbeat_loop", "asyncio task", "Monitoreo de peers")
     }
 
     Rel(api_data, config, "Lee", "IS_LEADER")
@@ -211,7 +204,7 @@ C4Component
     Rel(heartbeat, database, "sync_from_leader()", "delete_all+insert_many")
     Rel(main, config, "Inicializa", "startup")
     Rel(main, heartbeat, "create_task()", "background loop")
-    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="2")
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
 
 ### 4.4 C4 — Diagrama de Código (Flujo 3PC)
