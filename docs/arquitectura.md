@@ -122,12 +122,12 @@ Se elige un **clúster de servicios web** (no HPC ni Big Data) por las siguiente
 C4Context
     title Diagrama de Contexto — Clúster VoIP Distribuido
 
-    Person(cliente, "Cliente / Operador", "Administrador que gestiona endpoints VoIP")
+    Person(cliente, "Cliente / Operador", "Gestiona endpoints VoIP")
     System_Boundary(cluster, "Clúster VoIP Distribuido") {
-        System(voip_cluster, "Sistema de Registro VoIP", "API REST para CRUD de extensiones SIP/WebRTC con replicación 3PC y alta disponibilidad")
+        System(voip_cluster, "Registro VoIP", "CRUD extensiones SIP/WebRTC + replicación 3PC")
     }
 
-    Rel(cliente, voip_cluster, "Consulta y gestiona endpoints VoIP", "HTTP/HTTPS :80/:443")
+    Rel(cliente, voip_cluster, "Consulta endpoints", "HTTP/HTTPS :80/:443")
     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
 
