@@ -18,7 +18,6 @@ LEADER_ID: str | None = os.environ.get("LEADER_ID")
 
 # --- Parámetros de red y tolerancia a fallos ---
 HEARTBEAT_INTERVAL: float = 3.0         # segundos entre pings de salud
-HTTP_TIMEOUT: float = 1.5               # timeout máximo por petición HTTP entre nodos
 MAX_FAILED_ATTEMPTS: int = 3            # intentos fallidos antes de declarar muerto a un nodo
 
 # Flag explícito de liderazgo (se setea en become_leader / se limpia en degradación)

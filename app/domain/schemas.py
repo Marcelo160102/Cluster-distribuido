@@ -36,18 +36,7 @@ class VoipEndpoint(BaseModel):
 
 
 class ItemCreate(BaseModel):
-    """Payload para crear un nuevo endpoint VoIP."""
-    data: str
-
-    @field_validator("data")
-    @classmethod
-    def validate_data(cls, v: str) -> str:
-        VoipEndpoint.model_validate_json(v)
-        return v
-
-
-class ItemUpdate(BaseModel):
-    """Payload para actualizar un endpoint VoIP existente."""
+    """Payload para crear/actualizar un endpoint VoIP."""
     data: str
 
     @field_validator("data")
@@ -63,13 +52,6 @@ class ItemResponse(BaseModel):
     data: str
     created_at: str
     updated_at: str
-
-
-class ReplicaRequest(BaseModel):
-    """Mensaje de replicación enviado del líder a los seguidores."""
-    operation: str              # "create" | "update" | "delete"
-    item_id: str | None = None
-    data: str | None = None
 
 
 class ElectionMessage(BaseModel):

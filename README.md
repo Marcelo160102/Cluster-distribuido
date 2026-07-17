@@ -232,6 +232,7 @@ Cluster-distribuido/
 ├── tests/                      # Smoke test + benchmark
 ├── docker-compose.yml          # 7 servicios
 ├── Dockerfile                  # python:3.11-slim + curl
+├── nginx-location-common.conf  # Proxy settings DRY (incluido por nginx.conf)
 ├── nginx.conf                  # LB con proxy_next_upstream + HTTPS
 └── .gitignore                  # Ignora certs/, docs/archive/
 ```

@@ -6,9 +6,10 @@ Cada nodo del clúster ejecuta:
    detecta caídas del líder, dispara elecciones y sincroniza nodos recuperados.
 """
 import asyncio
+from contextlib import asynccontextmanager
 
 import app.core.config as cfg
-from app.core.database import init_db, delete_all, insert_many
+from app.core.database import init_db, delete_all, insert_many, get_all as db_get_all
 from app.services.leader_election import start_election
 from app.services.node_client import health_check, cluster_sync
 from app.api.routes_cluster import router as cluster_router
@@ -22,49 +23,6 @@ ACTIVE_REQUESTS = Gauge("app_active_requests", "Solicitudes activas en el nodo")
 REQUEST_LATENCY = Histogram("app_request_latency_seconds", "Latencia de solicitudes por endpoint", ["method", "endpoint"])
 LEADER_GAUGE = Gauge("app_is_leader", "1 si este nodo es el líder, 0 si es seguidor")
 RECORDS_GAUGE = Gauge("app_records_total", "Registros en la base de datos local")
-
-app = FastAPI(title="Nodo del Clúster Distribuido", version="1.0.0")
-app.include_router(cluster_router)
-app.include_router(data_router)
-
-
-@app.get("/metrics")
-async def metrics():
-    """Expone métricas en formato Prometheus."""
-    LEADER_GAUGE.set(1 if cfg.IS_LEADER else 0)
-    from app.core.database import get_all as db_get_all
-    RECORDS_GAUGE.set(len(db_get_all()))
-    return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
-
-
-@app.middleware("http")
-async def api_key_middleware(request: Request, call_next):
-    """Valida API Key en endpoints públicos /data (Fase 3: Seguridad)."""
-    if request.url.path.startswith("/data"):
-        key = request.headers.get("X-API-Key")
-        if key != cfg.API_KEY:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "API Key inválida"},
-            )
-    return await call_next(request)
-
-
-@app.middleware("http")
-async def metrics_middleware(request: Request, call_next):
-    """Registra métricas de solicitudes para Prometheus."""
-    ACTIVE_REQUESTS.inc()
-    REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path).inc()
-    with REQUEST_LATENCY.labels(method=request.method, endpoint=request.url.path).time():
-        response = await call_next(request)
-    ACTIVE_REQUESTS.dec()
-    return response
-
-
-# Registro de intentos fallidos y estado de conectividad por peer
-failed_attempts: dict[str, int] = {}
-node_alive: dict[str, bool] = {}
-my_url: str = ""
 
 
 async def sync_from_leader():
@@ -104,44 +62,42 @@ async def discover_leader() -> str | None:
 
 
 async def heartbeat_loop():
-    """Loop principal de monitoreo (se ejecuta como tarea asíncrona de fondo).
-
-    Por cada iteración:
-    - Verifica salud del líder actual (si existe)
-    - Si el líder murió, descubre uno existente o inicia elección Bully
-    - Verifica salud de todos los peers, detecta recuperaciones y sincroniza
-    """
-    global my_url
+    """Loop principal de monitoreo (se ejecuta como tarea asíncrona de fondo)."""
+    failed_attempts: dict[str, int] = {}
+    node_alive: dict[str, bool] = {peer: True for peer in cfg.PEERS}
     my_url = f"http://{cfg.NODE_ID}:{cfg.NODE_PORT}"
-    while True:
-        leader_alive = True
-        if cfg.LEADER_ID:
-            leader_url = f"http://{cfg.LEADER_ID}:{cfg.NODE_PORT}"
-            result = await health_check(leader_url)
-            if result is None:
-                failed_attempts[leader_url] = failed_attempts.get(leader_url, 0) + 1
-                if failed_attempts[leader_url] >= cfg.MAX_FAILED_ATTEMPTS:
-                    print(f"[HEARTBEAT] LÍDER {cfg.LEADER_ID} declarado MUERTO")
-                    leader_alive = False
-                    node_alive[leader_url] = False
-            else:
-                failed_attempts[leader_url] = 0
-                if not node_alive.get(leader_url, True):
-                    print(f"[HEARTBEAT] LÍDER {cfg.LEADER_ID} RECUPERADO")
-                    node_alive[leader_url] = True
-                    await sync_from_leader()
 
-        if cfg.LEADER_ID is not None and not leader_alive:
-            existing_leader = await discover_leader()
-            if existing_leader:
-                cfg.LEADER_ID = existing_leader
-                print(f"[DISCOVER] Líder existente encontrado: {existing_leader}")
+    async def _check_leader_health() -> bool:
+        if not cfg.LEADER_ID:
+            return True
+        leader_url = f"http://{cfg.LEADER_ID}:{cfg.NODE_PORT}"
+        result = await health_check(leader_url)
+        if result is None:
+            failed_attempts[leader_url] = failed_attempts.get(leader_url, 0) + 1
+            if failed_attempts[leader_url] >= cfg.MAX_FAILED_ATTEMPTS:
+                print(f"[HEARTBEAT] LÍDER {cfg.LEADER_ID} declarado MUERTO")
+                node_alive[leader_url] = False
+                return False
+        else:
+            failed_attempts[leader_url] = 0
+            if not node_alive.get(leader_url, True):
+                print(f"[HEARTBEAT] LÍDER {cfg.LEADER_ID} RECUPERADO")
+                node_alive[leader_url] = True
                 await sync_from_leader()
-            else:
-                elected = await start_election()
-                if elected:
-                    print(f"[ELECCIÓN] Nuevo líder elegido: {elected} (ID mayor en el clúster)")
+        return True
 
+    async def _handle_leader_failure():
+        existing_leader = await discover_leader()
+        if existing_leader:
+            cfg.LEADER_ID = existing_leader
+            print(f"[DISCOVER] Líder existente encontrado: {existing_leader}")
+            await sync_from_leader()
+        else:
+            elected = await start_election()
+            if elected:
+                print(f"[ELECCIÓN] Nuevo líder elegido: {elected} (ID mayor en el clúster)")
+
+    async def _check_peers_health():
         for peer in cfg.PEERS:
             if peer == my_url:
                 continue
@@ -161,24 +117,18 @@ async def heartbeat_loop():
                     if cfg.LEADER_ID:
                         await sync_from_leader()
 
+    while True:
+        leader_alive = await _check_leader_health()
+        if cfg.LEADER_ID is not None and not leader_alive:
+            await _handle_leader_failure()
+        await _check_peers_health()
         await asyncio.sleep(cfg.HEARTBEAT_INTERVAL)
 
 
-@app.on_event("startup")
-async def startup():
-    """Inicialización del nodo al arrancar FastAPI.
-
-    1. Inicializa base de datos SQLite
-    2. Descubre si ya hay un líder en el clúster
-    3. Si hay líder → se une como seguidor y sincroniza
-    4. Si no hay líder → el de mayor ID se declara líder inicial
-    5. Arranca el heartbeat_loop en background
-    """
-    global my_url
-    my_url = f"http://{cfg.NODE_ID}:{cfg.NODE_PORT}"
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Inicialización del nodo al arrancar FastAPI."""
     init_db()
-    for peer in cfg.PEERS:
-        node_alive[peer] = True
 
     existing_leader = await discover_leader()
     if existing_leader:
@@ -187,6 +137,7 @@ async def startup():
         print(f"[INIT] {cfg.NODE_ID} es SEGUIDOR, líder detectado: {cfg.LEADER_ID}")
         await sync_from_leader()
     else:
+        my_url = f"http://{cfg.NODE_ID}:{cfg.NODE_PORT}"
         all_urls = sorted(cfg.PEERS + [my_url])
         if my_url == all_urls[-1]:
             cfg.LEADER_ID = None
@@ -197,7 +148,46 @@ async def startup():
             cfg.IS_LEADER = False
             print(f"[INIT] {cfg.NODE_ID} es SEGUIDOR (inicial), líder esperado: {cfg.LEADER_ID}")
 
-    asyncio.create_task(heartbeat_loop())
+    task = asyncio.create_task(heartbeat_loop())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Nodo del Clúster Distribuido", version="1.0.0", lifespan=lifespan)
+app.include_router(cluster_router)
+app.include_router(data_router)
+
+
+@app.get("/metrics")
+async def metrics():
+    """Expone métricas en formato Prometheus."""
+    LEADER_GAUGE.set(1 if cfg.IS_LEADER else 0)
+    RECORDS_GAUGE.set(len(db_get_all()))
+    return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Valida API Key en endpoints públicos /data (Fase 3: Seguridad)."""
+    if request.url.path.startswith("/data"):
+        key = request.headers.get("X-API-Key")
+        if key != cfg.API_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "API Key inválida"},
+            )
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Registra métricas de solicitudes para Prometheus."""
+    ACTIVE_REQUESTS.inc()
+    REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path).inc()
+    with REQUEST_LATENCY.labels(method=request.method, endpoint=request.url.path).time():
+        response = await call_next(request)
+    ACTIVE_REQUESTS.dec()
+    return response
 
 
 @app.get("/")
