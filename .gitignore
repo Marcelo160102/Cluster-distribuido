@@ -25,5 +25,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
-exit
 certs/
+
+# Archivos históricos (no parte del entregable final)
+docs/archive/
