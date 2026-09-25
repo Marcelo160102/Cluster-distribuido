@@ -583,21 +583,6 @@ Cluster-distribuido/
 │   ├── selfsigned.crt
 │   └── selfsigned.key
 ├── docs/
-│   ├── apendice-comandos.md      ← F5
-│   ├── arquitectura.md           ← F1 (DIAGRAMA C4)
-│   ├── checklist-instalacion.md  ← F2
-│   ├── enunciado_del_proyecto.md
-│   ├── fase-monitoreo.md
-│   ├── glosario.md               ← F5
-│   ├── informe-final.pdf         ← F5 (generado)
-│   ├── manual-operacion.md       ← F5
-│   ├── monitoreo.md              ← F3
-│   ├── plan-orquestacion.md      ← (plan anterior, reemplazado)
-│   ├── plan-proyecto.md          ← ESTE ARCHIVO
-│   ├── politicas-seguridad.md    ← F3
-│   ├── pruebas-ha.md             ← F3
-│   ├── reporte-rendimiento.md    ← F4
-│   └── Proyecto_Sistemas_Distribuidos_2026.md
 ├── monitoring/
 │   └── prometheus.yml
 ├── scripts/
